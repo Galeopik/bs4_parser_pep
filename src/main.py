@@ -8,8 +8,8 @@ import requests_cache
 from tqdm import tqdm
 
 from configs import configure_argument_parser, configure_logging
-from constants import (DOWNLOADS_DIR, EXPECTED_STATUS, MAIN_DOC_URL,
-                       MAIN_PEP_URL, RESULTS_DIR, SUCCESS_SAVE)
+from constants import (BASE_DIR, EXPECTED_STATUS, MAIN_DOC_URL, MAIN_PEP_URL,
+                       SUCCESS_SAVE)
 from outputs import control_output
 from utils import find_tag, get_soup
 
@@ -131,8 +131,9 @@ def download(session):
     link = urljoin(downloads_url, html_tag['href'])
     filename = link.split('/')[-1]
 
-    DOWNLOADS_DIR.mkdir(exist_ok=True)
-    archive_path = DOWNLOADS_DIR / filename
+    downloads_dir = BASE_DIR / 'downloads'  # НЕ МОГУ ПЕРЕНЕСТИ В КОНСТАНТУ!!!
+    downloads_dir.mkdir(exist_ok=True)
+    archive_path = downloads_dir / filename
 
     response = session.get(link)
     with open(archive_path, 'wb') as file:
@@ -176,8 +177,9 @@ def pep(session):
         for result in results
         if result['actual_status'] is not None
     )
-    RESULTS_DIR.mkdir(exist_ok=True)
-    results_path = RESULTS_DIR / 'pep_statuses.csv'
+    results_dir = BASE_DIR / 'results'  # НЕ МОГУ ПЕРЕНЕСТИ В КОНСТАНТУ!!!
+    results_dir.mkdir(exist_ok=True)
+    results_path = results_dir / 'pep_statuses.csv'
     with open(
         results_path,
         'w',
