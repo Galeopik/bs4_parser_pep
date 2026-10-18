@@ -32,6 +32,44 @@ ENDING_PARSER = 'Парсер завершил работу.'
 ERROR_WORKING_PARSER = 'Ошибка во время работы парсера.'
 
 
+def get_pep_results(section):
+    """
+    Функция вынесена, чтобы облегчить функцию pep
+    И не вызывть ошибку flake8 'is too complex'
+    """
+    results = []
+
+    for row in section.find_all('tr'):
+        first_cell = row.find('td')
+        link = row.find('a', href=True)
+        if first_cell is None or link is None:
+            continue
+
+        status_code = first_cell.get_text(strip=True)[1:]
+        results.append({
+            'url': link['href'],
+            'status_code': status_code,
+            'expected_statuses': EXPECTED_STATUS.get(status_code),
+        })
+    return results
+
+
+def get_actual_status_from_pep(session, pep_url):
+    """
+    Функция вынесена, чтобы облегчить функцию pep
+    И не вызывть ошибку flake8 'is too complex'
+    """
+    soup = get_soup(session=session, url=pep_url)
+    actual_status = None
+    for tag in soup.find_all('dt'):
+        if tag.get_text(strip=True).rstrip(':') == 'Status':
+            status_tag = tag.find_next_sibling('dd')
+            if status_tag:
+                actual_status = status_tag.get_text(strip=True)
+            break
+    return actual_status
+
+
 def whats_new(session):
     whats_new_url = urljoin(MAIN_DOC_URL, 'whatsnew/')
 
@@ -105,20 +143,7 @@ def download(session):
 def pep(session):
     soup = get_soup(session=session, url=MAIN_PEP_URL)
     section = find_tag(soup, 'section', attrs={'id': 'index-by-category'})
-    results = []
-
-    for row in section.find_all('tr'):
-        first_cell = row.find('td')
-        link = row.find('a', href=True)
-        if first_cell is None or link is None:
-            continue
-
-        status_code = first_cell.get_text(strip=True)[1:]
-        results.append({
-            'url': link['href'],
-            'status_code': status_code,
-            'expected_statuses': EXPECTED_STATUS.get(status_code),
-        })
+    results = get_pep_results(section)
 
     warnings = []
 
@@ -129,13 +154,7 @@ def pep(session):
         except OSError as error:
             logging.exception(ERROR_GET_SOUP.format(url=pep_url,
                                                     error=error))
-
-        for tag in soup.find_all('dt'):
-            if tag.get_text(strip=True).rstrip(':') == 'Status':
-                status_tag = tag.find_next_sibling('dd')
-                if status_tag:
-                    actual_status = status_tag.get_text(strip=True)
-
+        actual_status = get_actual_status_from_pep(session, pep_url)
         result['actual_status'] = actual_status
 
         if actual_status is None:
