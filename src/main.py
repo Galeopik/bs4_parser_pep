@@ -1,3 +1,5 @@
+import csv
+from collections import Counter
 import logging
 import re
 from urllib.parse import urljoin
@@ -6,10 +8,16 @@ import requests_cache
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-from constants import BASE_DIR, MAIN_DOC_URL
-from config import configure_argument_parser, configure_logging
+from constants import BASE_DIR, MAIN_DOC_URL, MAIN_PEP_URL, EXPECTED_STATUS
+from configs import configure_argument_parser, configure_logging
 from outputs import control_output
-from utils import get_response, find_tag
+from utils import get_response, find_tag, get_pep_status
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s',
+)
 
 
 def whats_new(session):
@@ -25,7 +33,7 @@ def whats_new(session):
     sections_by_python = div_with_ul.find_all('li',
                                               attrs={'class': 'toctree-l1'})
 
-    results = [('Ссылка на статью', 'Заголовок', 'Редактор')]
+    results = [('Ссылка на статью', 'Заголовок', 'Редактор, автор')]
     for section in tqdm(sections_by_python, desc='Загрузка иформации: '):
         version_a_tag = find_tag(section, 'a')
         href = version_a_tag['href']
@@ -93,10 +101,82 @@ def download(session):
     logging.info(f'Архив был загружен и сохранён: {archive_path}')
 
 
+def pep(session):
+    session = requests_cache.CachedSession()
+    response = session.get(MAIN_PEP_URL)
+    soup = BeautifulSoup(response.text, features='lxml')
+    section = find_tag(soup, 'section', attrs={'id': 'index-by-category'})
+
+    rows = section.find_all('tr')
+
+    results = []
+
+    for row in tqdm(rows, desc='Поиск всех статусов и типов'):
+        first_cell = row.find('td')
+        if first_cell is None:
+            continue
+        link = row.find('a', href=True)
+        if link is None:
+            continue
+        url = link['href']
+        preview_status = first_cell.get_text(strip=True)
+        status_code = preview_status[1:]
+        expected_statuses = EXPECTED_STATUS.get(status_code)
+        results.append({
+            'url': url,
+            'status_code': status_code,
+            'expected_statuses': expected_statuses
+        })
+
+    for result in tqdm(results, desc='Проверка актульных статусов'):
+        pep_url = urljoin(MAIN_PEP_URL, result['url'])
+        response = session.get(pep_url)
+        soup = BeautifulSoup(response.text, features='lxml')
+
+        actual_status = get_pep_status(soup)
+        result['actual_status'] = actual_status
+
+        if actual_status is None:
+            logging.warning('Не удалось получить статус: %s', pep_url)
+            continue
+
+        expected_status = result['expected_statuses']
+        if actual_status not in expected_status:
+            logging.warning(
+                'Несовпадение статусов на странице %s: '
+                'статус в карточке — %s, ожидаемые статусы — %s',
+                pep_url,
+                actual_status,
+                list(expected_statuses),
+            )
+
+    status_counts = Counter(
+        result['actual_status']
+        for result in results
+        if result['actual_status'] is not None
+    )
+    results_dir = BASE_DIR / 'results'
+    results_dir.mkdir(exist_ok=True)
+    results_path = results_dir / 'pep_statuses.csv'
+    with open(
+        results_path,
+        'w',
+        encoding='utf-8',
+        newline=''
+    ) as file:
+        writer = csv.writer(file)
+        writer.writerow(['Статус', 'Количество'])
+        for status, count in sorted(status_counts.items()):
+            writer.writerow([status, count])
+        writer.writerow(['Total', sum(status_counts.values())])
+    logging.info(f'Результат был загружен и сохранён: {results_path}')
+
+
 MODE_TO_FUNCTION = {
     'whats-new': whats_new,
     'latest-versions': latest_versions,
     'download': download,
+    'pep': pep
 }
 
 
