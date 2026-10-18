@@ -1,20 +1,24 @@
+import csv
 import logging
 import re
+from collections import Counter
 from urllib.parse import urljoin
 
 import requests_cache
 from tqdm import tqdm
 
 from configs import configure_argument_parser, configure_logging
-from constants import BASE_DIR, MAIN_DOC_URL, MAIN_PEP_URL
-from outputs import control_output, pep_output
-from utils import find_tag, get_pep_results, get_soup
+from constants import (DOWNLOADS_DIR, EXPECTED_STATUS, MAIN_DOC_URL,
+                       MAIN_PEP_URL, RESULTS_DIR, SUCCESS_SAVE)
+from outputs import control_output
+from utils import find_tag, get_soup
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(levelname)s: %(message)s',
 )
 
+ERROR_GET_SOUP = 'Не удалось загрузить статью: {url} {error}'
 SUCCESS_DOWNLOAD = 'Архив был загружен и сохранён: {path}'
 UNSECCESS_GET_STATUS = 'Не удалось получить статус: {url}'
 MISMATCH_STATUS = (
@@ -33,16 +37,19 @@ def whats_new(session):
 
     soup = get_soup(session=session, url=whats_new_url)
 
-    sections_by_python = soup.select(
-        '#what-s-new-in-python div.toctree-wrapper li.toctree-l1'
+    version_links = soup.select(
+        '#what-s-new-in-python div.toctree-wrapper li.toctree-l1 > a'
     )
 
     results = [('Ссылка на статью', 'Заголовок', 'Редактор, автор')]
-    for section in tqdm(sections_by_python, desc='Загрузка иформации: '):
-        version_a_tag = find_tag(section, 'a')
+    for version_a_tag in tqdm(version_links, desc='Загрузка иформации: '):
         href = version_a_tag['href']
         version_link = urljoin(whats_new_url, href)
-        soup = get_soup(session=session, url=version_link)
+        try:
+            soup = get_soup(session=session, url=version_link)
+        except OSError as error:
+            logging.exception(ERROR_GET_SOUP.format(url=version_link,
+                                                    error=error))
         find_h1 = find_tag(soup, 'h1')
         find_dl = find_tag(soup, 'dl')
         dl_text = find_dl.text.replace('\n', ' ')
@@ -61,7 +68,7 @@ def latest_versions(session):
             a_tags = ul.find_all('a')
             break
     else:
-        raise LookupError(
+        raise ValueError(
             'В боковой панели не найден список "All versions".'
         )
     results = [('Ссылка на документацию', 'Версия', 'Статус')]
@@ -86,9 +93,8 @@ def download(session):
     link = urljoin(downloads_url, html_tag['href'])
     filename = link.split('/')[-1]
 
-    downloads_dir = BASE_DIR / 'downloads'  # Тест ожидает BASE_DIR
-    downloads_dir.mkdir(exist_ok=True)
-    archive_path = downloads_dir / filename
+    DOWNLOADS_DIR.mkdir(exist_ok=True)
+    archive_path = DOWNLOADS_DIR / filename
 
     response = session.get(link)
     with open(archive_path, 'wb') as file:
@@ -99,13 +105,30 @@ def download(session):
 def pep(session):
     soup = get_soup(session=session, url=MAIN_PEP_URL)
     section = find_tag(soup, 'section', attrs={'id': 'index-by-category'})
-    results = get_pep_results(section)
+    results = []
+
+    for row in section.find_all('tr'):
+        first_cell = row.find('td')
+        link = row.find('a', href=True)
+        if first_cell is None or link is None:
+            continue
+
+        status_code = first_cell.get_text(strip=True)[1:]
+        results.append({
+            'url': link['href'],
+            'status_code': status_code,
+            'expected_statuses': EXPECTED_STATUS.get(status_code),
+        })
 
     warnings = []
 
     for result in tqdm(results, desc='Проверка актульных статусов'):
         pep_url = urljoin(MAIN_PEP_URL, result['url'])
-        soup = get_soup(session=session, url=pep_url)
+        try:
+            soup = get_soup(session=session, url=pep_url)
+        except OSError as error:
+            logging.exception(ERROR_GET_SOUP.format(url=pep_url,
+                                                    error=error))
 
         for tag in soup.find_all('dt'):
             if tag.get_text(strip=True).rstrip(':') == 'Status':
@@ -126,9 +149,28 @@ def pep(session):
                 actual_status=actual_status,
                 expected_statuses=list(expected_status))
             )
-    for warning in warnings:
-        print(warning)
-    pep_output(results)
+    if warnings:
+        logging.warning('\n'.join(warnings))
+
+    status_counts = Counter(
+        result['actual_status']
+        for result in results
+        if result['actual_status'] is not None
+    )
+    RESULTS_DIR.mkdir(exist_ok=True)
+    results_path = RESULTS_DIR / 'pep_statuses.csv'
+    with open(
+        results_path,
+        'w',
+        encoding='utf-8',
+        newline=''
+    ) as file:
+        writer = csv.writer(file)
+        writer.writerow(['Статус', 'Количество'])
+        for status, count in sorted(status_counts.items()):
+            writer.writerow([status, count])
+        writer.writerow(['Total', sum(status_counts.values())])
+    logging.info(SUCCESS_SAVE.format(path=results_path))
 
 
 MODE_TO_FUNCTION = {
@@ -155,7 +197,6 @@ def main():
             control_output(results, args)
     except Exception:
         logging.exception(ERROR_WORKING_PARSER)
-        raise
     logging.info(ENDING_PARSER)
 
 

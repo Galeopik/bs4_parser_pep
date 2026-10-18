@@ -1,7 +1,6 @@
 from bs4 import BeautifulSoup
 from requests import RequestException
 
-from constants import ENCODING, EXPECTED_STATUS
 from exceptions import ParserFindTagException
 
 ERROR_GET_RESPONSE = (
@@ -11,13 +10,13 @@ ERROR_GET_RESPONSE = (
 ERROR_TAG_MESSAGE = 'Не найден тег {tag} {attrs}'
 
 
-def get_response(session, url):
+def get_response(session, url, encoding='utf-8'):
     try:
         response = session.get(url)
-        response.encoding = ENCODING
+        response.encoding = encoding
         return response
     except RequestException as error:
-        raise RequestException(
+        raise OSError(
             ERROR_GET_RESPONSE.format(url=url, error=error)
         )
 
@@ -33,26 +32,4 @@ def find_tag(soup, tag, attrs=None):
 
 def get_soup(session, url, features='lxml'):
     response = get_response(session, url)
-    if response is None:
-        return
-    soup = BeautifulSoup(response.text, features=features)
-    return soup
-
-
-def get_pep_results(section):
-    results = []
-
-    for row in section.find_all('tr'):
-        first_cell = row.find('td')
-        link = row.find('a', href=True)
-        if first_cell is None or link is None:
-            continue
-
-        status_code = first_cell.get_text(strip=True)[1:]
-        results.append({
-            'url': link['href'],
-            'status_code': status_code,
-            'expected_statuses': EXPECTED_STATUS.get(status_code),
-        })
-
-    return results
+    return BeautifulSoup(response.text, features=features)
