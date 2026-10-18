@@ -100,6 +100,7 @@ Linux/macOS:
 Часть тестов использует моки HTTP-запросов. Тест `test_latest_versions` в исходном проекте помечен `@pytest.mark.skip()` и поэтому пропускается безусловно, пока этот декоратор не будет удалён.
 
 ## Автор
+Белоусов Глеб Сергеевич
 
 - GitHub: [Galeopik](https://github.com/Galeopik)
 - Telegram: [Galeop](https://t.me/galeop)
