@@ -1,5 +1,3 @@
-import logging
-
 from bs4 import BeautifulSoup
 from requests import RequestException
 
@@ -27,8 +25,6 @@ def get_response(session, url):
 def find_tag(soup, tag, attrs=None):
     searched_tag = soup.find(tag, attrs=(attrs or {}))
     if searched_tag is None:
-        logging.error(ERROR_TAG_MESSAGE.format(tag=tag, attrs=attrs),
-                      exc_info=True)
         raise ParserFindTagException(
             ERROR_TAG_MESSAGE.format(tag=tag, attrs=attrs)
         )
