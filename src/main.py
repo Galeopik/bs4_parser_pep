@@ -1,4 +1,3 @@
-import csv
 import logging
 import re
 from collections import Counter
@@ -8,8 +7,9 @@ import requests_cache
 from tqdm import tqdm
 
 from configs import configure_argument_parser, configure_logging
-from constants import (BASE_DIR, EXPECTED_STATUS, MAIN_DOC_URL, MAIN_PEP_URL,
-                       SUCCESS_SAVE)
+from constants import (BASE_DIR, EXPECTED_STATUS, MAIN_DOC_URL,
+                       MAIN_PEP_URL)
+from exceptions import ParserFindTagException
 from outputs import control_output
 from utils import find_tag, get_soup
 
@@ -35,7 +35,7 @@ ERROR_WORKING_PARSER = 'Ошибка во время работы парсера
 def get_pep_results(section):
     """
     Функция вынесена, чтобы облегчить функцию pep
-    И не вызывть ошибку flake8 'is too complex'
+    И не вызвать ошибку flake8 'is too complex'
     """
     results = []
 
@@ -57,7 +57,7 @@ def get_pep_results(section):
 def get_actual_status_from_pep(session, pep_url):
     """
     Функция вынесена, чтобы облегчить функцию pep
-    И не вызывть ошибку flake8 'is too complex'
+    И не вызвать ошибку flake8 'is too complex'
     """
     soup = get_soup(session=session, url=pep_url)
     actual_status = None
@@ -80,20 +80,22 @@ def whats_new(session):
     )
 
     results = [('Ссылка на статью', 'Заголовок', 'Редактор, автор')]
+    exceptions = []
     for version_a_tag in tqdm(version_links, desc='Загрузка иформации: '):
         href = version_a_tag['href']
         version_link = urljoin(whats_new_url, href)
         try:
             soup = get_soup(session=session, url=version_link)
         except OSError as error:
-            logging.exception(ERROR_GET_SOUP.format(url=version_link,
+            exceptions.append(ERROR_GET_SOUP.format(url=version_link,
                                                     error=error))
         find_h1 = find_tag(soup, 'h1')
         find_dl = find_tag(soup, 'dl')
         dl_text = find_dl.text.replace('\n', ' ')
 
         results.append((version_link, find_h1.text, dl_text))
-
+    if exceptions:
+        logging.exception('\n'.join(exceptions))
     return results
 
 
@@ -106,7 +108,7 @@ def latest_versions(session):
             a_tags = ul.find_all('a')
             break
     else:
-        raise ValueError(
+        raise ParserFindTagException(
             'В боковой панели не найден список "All versions".'
         )
     results = [('Ссылка на документацию', 'Версия', 'Статус')]
@@ -147,13 +149,14 @@ def pep(session):
     results = get_pep_results(section)
 
     warnings = []
+    exceptions = []
 
     for result in tqdm(results, desc='Проверка актульных статусов'):
         pep_url = urljoin(MAIN_PEP_URL, result['url'])
         try:
             soup = get_soup(session=session, url=pep_url)
         except OSError as error:
-            logging.exception(ERROR_GET_SOUP.format(url=pep_url,
+            exceptions.append(ERROR_GET_SOUP.format(url=pep_url,
                                                     error=error))
         actual_status = get_actual_status_from_pep(session, pep_url)
         result['actual_status'] = actual_status
@@ -171,27 +174,18 @@ def pep(session):
             )
     if warnings:
         logging.warning('\n'.join(warnings))
-
+    if exceptions:
+        logging.exception('\n'.join(exceptions))
     status_counts = Counter(
         result['actual_status']
         for result in results
         if result['actual_status'] is not None
     )
-    results_dir = BASE_DIR / 'results'  # НЕ МОГУ ПЕРЕНЕСТИ В КОНСТАНТУ!!!
-    results_dir.mkdir(exist_ok=True)
-    results_path = results_dir / 'pep_statuses.csv'
-    with open(
-        results_path,
-        'w',
-        encoding='utf-8',
-        newline=''
-    ) as file:
-        writer = csv.writer(file)
-        writer.writerow(['Статус', 'Количество'])
-        for status, count in sorted(status_counts.items()):
-            writer.writerow([status, count])
-        writer.writerow(['Total', sum(status_counts.values())])
-    logging.info(SUCCESS_SAVE.format(path=results_path))
+    return [
+        ('Статус', 'Количество'),
+        *sorted(status_counts.items()),
+        ('Total', sum(status_counts.values())),
+    ]
 
 
 MODE_TO_FUNCTION = {
