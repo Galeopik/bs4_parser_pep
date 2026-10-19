@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from configs import configure_argument_parser, configure_logging
 from constants import BASE_DIR, EXPECTED_STATUS, MAIN_DOC_URL, MAIN_PEP_URL
-from exceptions import ParserFindTagException
+from exceptions import ParserFindTagException, ParserFindAllVersionsException
 from outputs import control_output
 from utils import find_tag, get_soup
 
@@ -53,12 +53,11 @@ def get_pep_results(section):
     return results
 
 
-def get_actual_status_from_pep(session, pep_url):
+def get_actual_status_from_pep(session, soup):
     """
     Функция вынесена, чтобы облегчить функцию pep
     И не вызвать ошибку flake8 'is too complex'
     """
-    soup = get_soup(session=session, url=pep_url)
     actual_status = None
     for tag in soup.find_all('dt'):
         if tag.get_text(strip=True).rstrip(':') == 'Status':
@@ -85,9 +84,10 @@ def whats_new(session):
         version_link = urljoin(whats_new_url, href)
         try:
             soup = get_soup(session=session, url=version_link)
-        except OSError as error:
+        except ConnectionError as error:
             exceptions.append(ERROR_GET_SOUP.format(url=version_link,
                                                     error=error))
+            continue
         find_h1 = find_tag(soup, 'h1')
         find_dl = find_tag(soup, 'dl')
         dl_text = find_dl.text.replace('\n', ' ')
@@ -107,7 +107,7 @@ def latest_versions(session):
             a_tags = ul.find_all('a')
             break
     else:
-        raise ParserFindTagException(
+        raise ParserFindAllVersionsException(
             'В боковой панели не найден список "All versions".'
         )
     results = [('Ссылка на документацию', 'Версия', 'Статус')]
@@ -154,10 +154,11 @@ def pep(session):
         pep_url = urljoin(MAIN_PEP_URL, result['url'])
         try:
             soup = get_soup(session=session, url=pep_url)
-        except OSError as error:
+        except ConnectionError as error:
             exceptions.append(ERROR_GET_SOUP.format(url=pep_url,
                                                     error=error))
-        actual_status = get_actual_status_from_pep(session, pep_url)
+            continue
+        actual_status = get_actual_status_from_pep(session, soup)
         result['actual_status'] = actual_status
 
         if actual_status is None:
@@ -182,8 +183,8 @@ def pep(session):
     )
     return [
         ('Статус', 'Количество'),
-        *sorted(status_counts.items()),
-        ('Total', sum(status_counts.values())),
+        status_counts.items(),
+        ('Total', sum(status_counts.values())),  # Название согласно ТЗ
     ]
 
 
