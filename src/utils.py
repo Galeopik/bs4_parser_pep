@@ -16,7 +16,7 @@ def get_response(session, url, encoding='utf-8'):
         response.encoding = encoding
         return response
     except RequestException as error:
-        raise OSError(
+        raise ConnectionError(
             ERROR_GET_RESPONSE.format(url=url, error=error)
         )
 
@@ -31,5 +31,4 @@ def find_tag(soup, tag, attrs=None):
 
 
 def get_soup(session, url, features='lxml'):
-    response = get_response(session, url)
-    return BeautifulSoup(response.text, features=features)
+    return BeautifulSoup(get_response(session, url).text, features=features)

@@ -8,10 +8,6 @@ from constants import (BASE_DIR, DATETIME_FORMAT, ENCODING, OUTPUT_FILE,
                        OUTPUT_PRETTY, SUCCESS_SAVE)
 
 
-def control_output(results, cli_args):
-    OUTPUT_FUNCTIONS[cli_args.output](results, cli_args)
-
-
 def default_output(results, cli_args):
     for row in results:
         print(*row)
@@ -28,9 +24,10 @@ def pretty_output(results, cli_args):
 def file_output(results, cli_args):
     results_dir = BASE_DIR / 'results'  # НЕ МОГУ ПЕРЕНЕСТИ В КОНСТАНТУ!!!
     results_dir.mkdir(exist_ok=True)
-    parser_mode = cli_args.mode
-    now_formatted = dt.datetime.now().strftime(DATETIME_FORMAT)
-    file_name = f'{parser_mode}_{now_formatted}.csv'
+    file_name = '{}_{}.csv'.format(
+        cli_args.mode,
+        dt.datetime.now().strftime(DATETIME_FORMAT)
+    )
     file_path = results_dir / file_name
     with open(file_path, 'w', encoding=ENCODING) as f:
         csv.writer(f, dialect=csv.unix_dialect).writerows(results)
@@ -42,3 +39,7 @@ OUTPUT_FUNCTIONS = {
     OUTPUT_FILE: file_output,
     None: default_output
 }
+
+
+def control_output(results, cli_args):
+    OUTPUT_FUNCTIONS[cli_args.output](results, cli_args)
